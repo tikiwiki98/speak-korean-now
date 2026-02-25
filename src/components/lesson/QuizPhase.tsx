@@ -10,7 +10,7 @@ interface QuizPhaseProps {
 type QuizQuestion =
   | { type: "mc-korean-to-english"; vocab: VocabItem; options: string[]; correctIndex: number }
   | { type: "mc-english-to-korean"; vocab: VocabItem; options: string[]; correctIndex: number }
-  | { type: "fill-in-blank"; vocab: VocabItem; blanked: string; answer: string; english: string };
+  | { type: "fill-in-blank"; vocab: VocabItem; blanked: string; answer: string; english: string; options: string[]; correctIndex: number };
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -61,15 +61,23 @@ function generateQuestions(topicId: string): QuizQuestion[] {
     });
   }
 
-  // 3 fill-in-blank (exposure 5-6)
+  // 3 fill-in-blank as word-bank MC (exposure 5-6)
   const fillVocab = shuffle(topicVocab).slice(0, 3);
   for (const v of fillVocab) {
+    const distractors = shuffle(
+      [...otherVocab, ...topicVocab.filter((w) => w.id !== v.id)]
+    )
+      .slice(0, 3)
+      .map((w) => w.korean);
+    const options = shuffle([v.exampleSentence.blankAnswer, ...distractors]);
     questions.push({
       type: "fill-in-blank",
       vocab: v,
       blanked: v.exampleSentence.blanked,
       answer: v.exampleSentence.blankAnswer,
       english: v.exampleSentence.english,
+      options,
+      correctIndex: options.indexOf(v.exampleSentence.blankAnswer),
     });
   }
 
@@ -152,6 +160,8 @@ export default function QuizPhase({ topicId, onComplete }: QuizPhaseProps) {
           blanked={question.blanked}
           answer={question.answer}
           english={question.english}
+          options={question.options}
+          correctIndex={question.correctIndex}
           answered={answered}
           onAnswer={handleAnswer}
         />
@@ -296,32 +306,35 @@ function MCQuestion({
   );
 }
 
-// ─── Fill in the Blank ───
+// ─── Fill in the Blank (Word Bank) ───
 
 function FillInBlank({
   blanked,
   answer,
   english,
+  options,
+  correctIndex,
   answered,
   onAnswer,
 }: {
   blanked: string;
   answer: string;
   english: string;
+  options: string[];
+  correctIndex: number;
   answered: boolean;
   onAnswer: (correct: boolean) => void;
 }) {
-  const [input, setInput] = useState("");
+  const [selected, setSelected] = useState<number | null>(null);
 
   useEffect(() => {
-    setInput("");
+    setSelected(null);
   }, [blanked]);
 
-  const handleSubmit = () => {
-    if (!input.trim() || answered) return;
-    const normalized = input.trim().replace(/[?.!]/g, "");
-    const normalizedAnswer = answer.replace(/[?.!]/g, "");
-    onAnswer(normalized === normalizedAnswer);
+  const handleSelect = (index: number) => {
+    if (answered) return;
+    setSelected(index);
+    onAnswer(index === correctIndex);
   };
 
   return (
@@ -332,33 +345,29 @@ function FillInBlank({
         <p className="text-sm text-muted-foreground mt-2">{english}</p>
       </div>
 
-      <div className="space-y-3">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-          placeholder="Type in Korean..."
-          disabled={answered}
-          autoFocus
-          className={`w-full px-4 py-3 rounded-xl border bg-card text-foreground font-korean text-lg placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-            answered
-              ? input.trim().replace(/[?.!]/g, "") === answer.replace(/[?.!]/g, "")
-                ? "border-success"
-                : "border-destructive"
-              : "border-border"
-          }`}
-        />
+      <div className="grid grid-cols-2 gap-2">
+        {options.map((option, i) => {
+          let style = "border-border hover:border-primary/30";
+          if (answered) {
+            if (i === correctIndex) style = "border-success bg-success/5";
+            else if (i === selected && i !== correctIndex)
+              style = "border-destructive bg-destructive/5";
+            else style = "border-border opacity-50";
+          } else if (i === selected) {
+            style = "border-primary bg-primary/5";
+          }
 
-        {!answered && (
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim()}
-            className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm transition-all hover:opacity-90 disabled:opacity-40"
-          >
-            Check
-          </button>
-        )}
+          return (
+            <button
+              key={i}
+              onClick={() => handleSelect(i)}
+              disabled={answered}
+              className={`px-4 py-3 rounded-xl border transition-all text-center font-korean text-lg ${style}`}
+            >
+              {option}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
