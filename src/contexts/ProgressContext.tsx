@@ -1,4 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { topics } from "@/data/content";
+
+export interface TopicProgress {
+  learnComplete: boolean;
+  quizComplete: boolean;
+  quizScore: number;
+  speakComplete: boolean;
+}
 
 interface ProgressData {
   totalMinutes: number;
@@ -8,6 +16,7 @@ interface ProgressData {
   completedPrompts: string[];
   reviewedVocab: string[];
   reviewedGrammar: string[];
+  topicProgress: Record<string, TopicProgress>;
 }
 
 interface ProgressContextType extends ProgressData {
@@ -16,8 +25,21 @@ interface ProgressContextType extends ProgressData {
   markPromptComplete: (id: string) => void;
   markVocabReviewed: (id: string) => void;
   markGrammarReviewed: (id: string) => void;
+  completeLearnPhase: (topicId: string) => void;
+  completeQuizPhase: (topicId: string, score: number) => void;
+  completeSpeakPhase: (topicId: string) => void;
+  isTopicUnlocked: (topicId: string) => boolean;
+  isTopicComplete: (topicId: string) => boolean;
+  getTopicProgress: (topicId: string) => TopicProgress;
   isSessionActive: boolean;
 }
+
+const defaultTopicProgress: TopicProgress = {
+  learnComplete: false,
+  quizComplete: false,
+  quizScore: 0,
+  speakComplete: false,
+};
 
 const defaultProgress: ProgressData = {
   totalMinutes: 0,
@@ -27,6 +49,7 @@ const defaultProgress: ProgressData = {
   completedPrompts: [],
   reviewedVocab: [],
   reviewedGrammar: [],
+  topicProgress: {},
 };
 
 const ProgressContext = createContext<ProgressContextType | undefined>(undefined);
@@ -42,9 +65,11 @@ function loadProgress(): ProgressData {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return defaultProgress;
     const data = JSON.parse(stored) as ProgressData;
-    // Reset today's minutes if it's a new day
     if (data.lastPracticeDate !== getToday()) {
       data.todayMinutes = 0;
+    }
+    if (!data.topicProgress) {
+      data.topicProgress = {};
     }
     return data;
   } catch {
@@ -61,7 +86,6 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
   }, [progress]);
 
-  // Auto-start session on mount, end on unmount
   useEffect(() => {
     const start = Date.now();
     setSessionStart(start);
@@ -83,7 +107,6 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Tick every minute to update today's time
   useEffect(() => {
     if (!sessionStart) return;
     const interval = setInterval(() => {
@@ -145,6 +168,77 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const completeLearnPhase = useCallback((topicId: string) => {
+    setProgress((prev) => ({
+      ...prev,
+      topicProgress: {
+        ...prev.topicProgress,
+        [topicId]: {
+          ...(prev.topicProgress[topicId] || defaultTopicProgress),
+          learnComplete: true,
+        },
+      },
+      lastPracticeDate: getToday(),
+    }));
+  }, []);
+
+  const completeQuizPhase = useCallback((topicId: string, score: number) => {
+    setProgress((prev) => ({
+      ...prev,
+      topicProgress: {
+        ...prev.topicProgress,
+        [topicId]: {
+          ...(prev.topicProgress[topicId] || defaultTopicProgress),
+          quizComplete: true,
+          quizScore: Math.max(prev.topicProgress[topicId]?.quizScore || 0, score),
+        },
+      },
+      lastPracticeDate: getToday(),
+    }));
+  }, []);
+
+  const completeSpeakPhase = useCallback((topicId: string) => {
+    setProgress((prev) => ({
+      ...prev,
+      topicProgress: {
+        ...prev.topicProgress,
+        [topicId]: {
+          ...(prev.topicProgress[topicId] || defaultTopicProgress),
+          speakComplete: true,
+        },
+      },
+      lastPracticeDate: getToday(),
+    }));
+  }, []);
+
+  const getTopicProgress = useCallback(
+    (topicId: string): TopicProgress => {
+      return progress.topicProgress[topicId] || defaultTopicProgress;
+    },
+    [progress.topicProgress]
+  );
+
+  const isTopicComplete = useCallback(
+    (topicId: string): boolean => {
+      const tp = progress.topicProgress[topicId];
+      if (!tp) return false;
+      return tp.learnComplete && tp.quizComplete && tp.speakComplete;
+    },
+    [progress.topicProgress]
+  );
+
+  const isTopicUnlocked = useCallback(
+    (topicId: string): boolean => {
+      const topic = topics.find((t) => t.id === topicId);
+      if (!topic) return false;
+      if (topic.order === 1) return true;
+      const prevTopic = topics.find((t) => t.order === topic.order - 1);
+      if (!prevTopic) return true;
+      return isTopicComplete(prevTopic.id);
+    },
+    [isTopicComplete]
+  );
+
   return (
     <ProgressContext.Provider
       value={{
@@ -155,6 +249,12 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
         markPromptComplete,
         markVocabReviewed,
         markGrammarReviewed,
+        completeLearnPhase,
+        completeQuizPhase,
+        completeSpeakPhase,
+        isTopicUnlocked,
+        isTopicComplete,
+        getTopicProgress,
       }}
     >
       {children}
